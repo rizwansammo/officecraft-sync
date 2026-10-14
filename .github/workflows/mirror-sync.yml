@@ -1,0 +1,71 @@
+
+name: Sync OfficeCraft Mirrors
+
+on:
+  schedule:
+    - cron: '41 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: officecraft-mirror-sync
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Sync ${{ matrix.repo }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        repo:
+          - wordcraft
+          - deckcraft
+          - gridcraft
+
+    env:
+      GH_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+      REPO: ${{ matrix.repo }}
+
+    steps:
+      - name: Configure Git authentication
+        run: gh auth setup-git
+
+      - name: Check updates and synchronize
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE="https://github.com/storytold/${REPO}.git"
+          TARGET="https://github.com/rizwansammo/${REPO}.git"
+
+          echo "Checking ${REPO} for updates..."
+
+          git ls-remote --refs "$SOURCE" \
+            'refs/heads/*' 'refs/tags/*' | LC_ALL=C sort \
+            > "${RUNNER_TEMP}/source-refs.txt"
+
+          git ls-remote --refs "$TARGET" \
+            'refs/heads/*' 'refs/tags/*' | LC_ALL=C sort \
+            > "${RUNNER_TEMP}/target-refs.txt"
+
+          if cmp -s \
+            "${RUNNER_TEMP}/source-refs.txt" \
+            "${RUNNER_TEMP}/target-refs.txt"; then
+            echo "Already up to date: ${REPO}"
+            exit 0
+          fi
+
+          echo "Updates found. Mirroring ${REPO}..."
+
+          git clone --bare "$SOURCE" \
+            "${RUNNER_TEMP}/${REPO}.git"
+
+          git -C "${RUNNER_TEMP}/${REPO}.git" \
+            push --mirror "$TARGET"
+
+          echo "Successfully synced: ${REPO}"
